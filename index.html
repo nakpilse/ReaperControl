@@ -50,21 +50,46 @@ const btn = (o) => ({ id: uid(), label: "New", type: "note", num: 60, value: "",
                       channel: 0, color: "pad", key: "", gamepad: "", ...o });
 const fdr = (o) => ({ id: uid(), label: "Knob", type: "cc", cc: 1, value: 0, channel: 0, axis: "", invert: false, color: "sand", ...o });
 
-// Resolves a button against its section's MIDI output/channel defaults
-// (the button's own channel, if set, still wins over the section's).
-const effItem = (s, b) => ({ ...b, channel: b.channel || s.channel || 0, outputName: s.outputName || "" });
+// Resolves a button against its page's (then its section's) MIDI output/channel
+// defaults — the button's own channel, if set, wins over both; a page's own
+// output/channel, if set, wins over its section's.
+const pageFor = (s, b) => (s.pages && (s.pages.find(p => p.id === b.pageId) || s.pages[0])) || null;
+const effItem = (s, b) => {
+  const p = pageFor(s, b);
+  return { ...b,
+    channel: b.channel || (p && p.channel) || s.channel || 0,
+    outputName: (p && p.outputName) || s.outputName || "" };
+};
 
 // A section with no pages (or an item whose page no longer exists) falls back to
 // its first page — keeps older saved layouts (from before pad tabs existed) working.
 const pageOf = s => (s.pages && s.pages.find(p => p.id === s.activePage)) || (s.pages && s.pages[0]) || null;
 const itemsOnPage = s => { const p = pageOf(s); return p ? s.items.filter(b => (b.pageId || (s.pages[0] && s.pages[0].id)) === p.id) : s.items; };
 
+// Helix Native MIDI implementation (Line 6 Helix MIDI/OSC reference): Program
+// Change selects presets 1:1 (PC 0 = preset 1, etc). CC#69 (values 0-7) selects
+// Snapshots 1-8 — this is Helix's fixed/global snapshot controller, not
+// something you need to MIDI-learn. CC#64 is Tap Tempo (any value >=64 taps).
+// Per-footswitch/stomp CCs are user-assignable in Helix Native itself, so they
+// aren't included here — add them with "Add button" once you've set them up
+// in Helix's Command Center. Offered as an optional preset tab, not a forced
+// default, via "Add Helix Native tab".
+function makeHelixPage() {
+  const page = { id: uid(), title: "Helix Native", outputName: "", channel: 0 };
+  const items = [
+    ...Array.from({ length: 8 }, (_, i) => btn({ label: "Preset " + (i + 1), type: "pc", num: i, color: "sky", pageId: page.id })),
+    ...Array.from({ length: 8 }, (_, i) => btn({ label: "Snapshot " + (i + 1), type: "cc", num: 69, value: i, off: i, mode: "trigger", color: "mint", pageId: page.id })),
+    btn({ label: "Tap Tempo", type: "cc", num: 64, value: 127, mode: "trigger", color: "sand", pageId: page.id }),
+  ];
+  return { page, items };
+}
+
 function makeDefault() {
   const padKeys = ["a","s","d","f","g","h","j","k","q","w","e","r","t","y","u","i"];
   const padPad = { 36: "A", 38: "B", 42: "X", 46: "Y", 49: "LB", 51: "RB" };
   const padColor = n => n === 36 ? "rose" : n === 38 ? "sand" : n === 42 || n === 46 ? "cyan" : n >= 49 ? "lilac" : "sky";
-  const transportPage = { id: uid(), title: "1" };
-  const padsPage = { id: uid(), title: "1" };
+  const transportPage = { id: uid(), title: "1", outputName: "", channel: 0 };
+  const padsPage = { id: uid(), title: "1", outputName: "", channel: 0 };
   return {
     version: 2,
     settings: { name: "REAPER Control", outputName: "", channel: 1, velocity: 100 },
@@ -376,18 +401,31 @@ function App() {
 
   // ---------- pad tabs (pages within a section) ----------
   const setPage = (secId, pageId) => update(d => { d.sections.find(s => s.id === secId).activePage = pageId; });
+  // Migrates a legacy, un-paged section into a single page "1" holding all its
+  // existing buttons — only happens the first time a section grows a second tab.
+  const ensurePaged = s => {
+    if (s.pages && s.pages.length) return;
+    const p0 = { id: uid(), title: "1", outputName: "", channel: 0 };
+    s.items.forEach(b => { b.pageId = p0.id; });
+    s.pages = [p0]; s.activePage = p0.id;
+  };
   const addPage = (secId) => update(d => {
     const s = d.sections.find(x => x.id === secId);
-    if (!s.pages || !s.pages.length) {
-      const p0 = { id: uid(), title: "1" };
-      s.items.forEach(b => { b.pageId = p0.id; });
-      s.pages = [p0]; s.activePage = p0.id;
-    }
-    const np = { id: uid(), title: String(s.pages.length + 1) };
+    ensurePaged(s);
+    const np = { id: uid(), title: String(s.pages.length + 1), outputName: "", channel: 0 };
     s.pages.push(np); s.activePage = np.id;
+  });
+  const addHelixTab = (secId) => update(d => {
+    const s = d.sections.find(x => x.id === secId);
+    ensurePaged(s);
+    const { page, items } = makeHelixPage();
+    s.pages.push(page); s.items.push(...items); s.activePage = page.id;
   });
   const renamePage = (secId, pageId, title) => update(d => {
     d.sections.find(x => x.id === secId).pages.find(p => p.id === pageId).title = title;
+  });
+  const setPageField = (secId, pageId, key, val) => update(d => {
+    d.sections.find(x => x.id === secId).pages.find(p => p.id === pageId)[key] = val;
   });
   const deletePage = (secId, pageId) => update(d => {
     const s = d.sections.find(x => x.id === secId); if (s.pages.length <= 1) return;
@@ -486,7 +524,7 @@ function App() {
       </footer>
 
       {edit && sel && <Editor sel={sel} config={config} update={update} findBtn={findBtn} close={() => setSel(null)} setSel={setSel} outputs={outputs}
-        addPage={addPage} renamePage={renamePage} deletePage={deletePage} />}
+        addPage={addPage} addHelixTab={addHelixTab} renamePage={renamePage} setPageField={setPageField} deletePage={deletePage} />}
       {edit && !sel && (
         <div className="drawer">
           <h3>Edit mode</h3>
@@ -571,18 +609,18 @@ function Knob({ f, max, edit, selected, onSelect, onChange }) {
 function Field({ label, children }) { return <label className="field">{label}{children}</label>; }
 const num = (v, lo, hi) => clamp(parseInt(v, 10) || 0, lo, hi);
 
-function ChannelSelect({ value, onChange }) {
+function ChannelSelect({ value, onChange, title }) {
   return (
-    <select value={value} onChange={e => onChange(+e.target.value)}>
+    <select value={value} onChange={e => onChange(+e.target.value)} title={title || "Channel"}>
       <option value={0}>Global (top bar)</option>
       {Array.from({ length: 16 }, (_, i) => <option key={i} value={i + 1}>{i + 1}</option>)}
     </select>
   );
 }
-function OutputSelect({ value, outputs, onChange }) {
+function OutputSelect({ value, outputs, onChange, title }) {
   const known = outputs.some(o => o.name === value);
   return (
-    <select value={value || ""} onChange={e => onChange(e.target.value)}>
+    <select value={value || ""} onChange={e => onChange(e.target.value)} title={title || "MIDI output"}>
       <option value="">Global (top bar)</option>
       {!known && value && <option value={value}>{value} (offline)</option>}
       {outputs.map(o => <option key={o.id} value={o.name}>{o.name}</option>)}
@@ -603,7 +641,7 @@ function Swatches({ value, onChange }) {
   );
 }
 
-function Editor({ sel, config, update, findBtn, close, setSel, outputs, addPage, renamePage, deletePage }) {
+function Editor({ sel, config, update, findBtn, close, setSel, outputs, addPage, addHelixTab, renamePage, setPageField, deletePage }) {
   if (sel.kind === "button") {
     const loc = findBtn(config, sel.id); if (!loc) return null;
     const b = loc.s.items[loc.i];
@@ -731,14 +769,23 @@ function Editor({ sel, config, update, findBtn, close, setSel, outputs, addPage,
           {(s.pages || []).map(p => {
             const count = s.items.filter(b => (b.pageId || s.pages[0].id) === p.id).length;
             return (
-              <div className="two" key={p.id}>
-                <input type="text" value={p.title} onChange={e => renamePage(s.id, p.id, e.target.value)} />
-                <button className="tb danger" disabled={s.pages.length <= 1}
-                  onClick={() => { if (!count || confirm(`Delete tab "${p.title}" and its ${count} buttons?`)) deletePage(s.id, p.id); }}>Delete</button>
+              <div className="pagecard" key={p.id}>
+                <div className="two">
+                  <input type="text" value={p.title} onChange={e => renamePage(s.id, p.id, e.target.value)} />
+                  <button className="tb danger" disabled={s.pages.length <= 1}
+                    onClick={() => { if (!count || confirm(`Delete tab "${p.title}" and its ${count} buttons?`)) deletePage(s.id, p.id); }}>Delete</button>
+                </div>
+                <div className="two">
+                  <OutputSelect value={p.outputName} outputs={outputs} onChange={v => setPageField(s.id, p.id, "outputName", v)} />
+                  <ChannelSelect value={p.channel || 0} onChange={v => setPageField(s.id, p.id, "channel", v)} />
+                </div>
               </div>
             );
           })}
-          <button className="tb" onClick={() => addPage(s.id)}>Add tab</button>
+          <div className="two">
+            <button className="tb" onClick={() => addPage(s.id)}>Add tab</button>
+            <button className="tb" onClick={() => addHelixTab(s.id)}>Add Helix Native tab</button>
+          </div>
         </Field>
         <div className="actions">
           <button className="tb" onClick={() => move(-1)}>Move up</button>
@@ -746,8 +793,8 @@ function Editor({ sel, config, update, findBtn, close, setSel, outputs, addPage,
           <button className="tb danger" onClick={() => { if (!s.items.length || confirm(`Delete “${s.title}” and its ${s.items.length} buttons?`)) { update(d => d.sections.splice(i, 1)); close(); } }}>Delete section</button>
         </div>
         <p className="help">Sections share the screen height by how many rows they have, so the deck always fills the display.</p>
-        <p className="help">MIDI output and channel here set the default for every button in this section. Each button's own Channel field (and the global settings in the top bar) still override it.</p>
-        <p className="help">Pad tabs split a section's buttons into switchable pages — handy when you have more pads than fit on screen. Tabs only show in the section header once there's more than one.</p>
+        <p className="help">MIDI output and channel here are the section's fallback — used by any tab that leaves its own output/channel on "Global". A button's own Channel field overrides everything.</p>
+        <p className="help">Pad tabs split a section's buttons into switchable pages — handy when you have more pads than fit on screen, or want each page on its own MIDI output/channel (e.g. a plugin tab routed to its own port). Tabs only show in the section header once there's more than one.</p>
       </div>
     );
   }
