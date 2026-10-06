@@ -54,27 +54,36 @@ const fdr = (o) => ({ id: uid(), label: "Knob", type: "cc", cc: 1, value: 0, cha
 // (the button's own channel, if set, still wins over the section's).
 const effItem = (s, b) => ({ ...b, channel: b.channel || s.channel || 0, outputName: s.outputName || "" });
 
+// A section with no pages (or an item whose page no longer exists) falls back to
+// its first page — keeps older saved layouts (from before pad tabs existed) working.
+const pageOf = s => (s.pages && s.pages.find(p => p.id === s.activePage)) || (s.pages && s.pages[0]) || null;
+const itemsOnPage = s => { const p = pageOf(s); return p ? s.items.filter(b => (b.pageId || (s.pages[0] && s.pages[0].id)) === p.id) : s.items; };
+
 function makeDefault() {
   const padKeys = ["a","s","d","f","g","h","j","k","q","w","e","r","t","y","u","i"];
   const padPad = { 36: "A", 38: "B", 42: "X", 46: "Y", 49: "LB", 51: "RB" };
   const padColor = n => n === 36 ? "rose" : n === 38 ? "sand" : n === 42 || n === 46 ? "cyan" : n >= 49 ? "lilac" : "sky";
+  const transportPage = { id: uid(), title: "1" };
+  const padsPage = { id: uid(), title: "1" };
   return {
     version: 2,
     settings: { name: "REAPER Control", outputName: "", channel: 1, velocity: 100 },
     faderGroup: { outputName: "", channel: 0 },
     sections: [
-      { id: uid(), title: "Transport", cols: 6, outputName: "", channel: 0, items: [
-        btn({ label: "Play",   type: "cc", num: 20, value: 127, mode: "trigger", color: "mint", key: "space", gamepad: "Menu" }),
-        btn({ label: "Stop",   type: "cc", num: 21, value: 127, mode: "trigger", gamepad: "View" }),
-        btn({ label: "Record", type: "cc", num: 22, value: 127, mode: "trigger", color: "rose" }),
-        btn({ label: "Rewind", type: "cc", num: 23, value: 127, mode: "trigger", gamepad: "Left" }),
-        btn({ label: "Loop",   type: "cc", num: 24, value: 127, mode: "trigger", color: "sky" }),
-        btn({ label: "Undo",   type: "cc", num: 25, value: 127, mode: "trigger", color: "orange" }),
+      { id: uid(), title: "Transport", cols: 6, outputName: "", channel: 0,
+        pages: [transportPage], activePage: transportPage.id, items: [
+        btn({ label: "Play",   type: "cc", num: 20, value: 127, mode: "trigger", color: "mint", key: "space", gamepad: "Menu", pageId: transportPage.id }),
+        btn({ label: "Stop",   type: "cc", num: 21, value: 127, mode: "trigger", gamepad: "View", pageId: transportPage.id }),
+        btn({ label: "Record", type: "cc", num: 22, value: 127, mode: "trigger", color: "rose", pageId: transportPage.id }),
+        btn({ label: "Rewind", type: "cc", num: 23, value: 127, mode: "trigger", gamepad: "Left", pageId: transportPage.id }),
+        btn({ label: "Loop",   type: "cc", num: 24, value: 127, mode: "trigger", color: "sky", pageId: transportPage.id }),
+        btn({ label: "Undo",   type: "cc", num: 25, value: 127, mode: "trigger", color: "orange", pageId: transportPage.id }),
       ]},
-      { id: uid(), title: "Pads", cols: 8, outputName: "", channel: 0, items: [
+      { id: uid(), title: "Pads", cols: 8, outputName: "", channel: 0,
+        pages: [padsPage], activePage: padsPage.id, items: [
         ...Array.from({ length: 8 }, (_, i) => 44 + i),
         ...Array.from({ length: 8 }, (_, i) => 36 + i),
-      ].map(n => btn({ label: noteName(n), num: n, color: padColor(n), key: padKeys[n - 36] || "", gamepad: padPad[n] || "" })) },
+      ].map(n => btn({ label: noteName(n), num: n, color: padColor(n), key: padKeys[n - 36] || "", gamepad: padPad[n] || "", pageId: padsPage.id })) },
     ],
     faders: [
       fdr({ label: "Volume", cc: 7, value: 100, color: "sand" }),
@@ -224,7 +233,7 @@ function App() {
   // ---------- computer keyboard ----------
   useEffect(() => {
     const keyOf = e => e.key === " " ? "space" : e.key.toLowerCase();
-    const all = () => cfgRef.current.sections.flatMap(s => s.items.map(b => effItem(s, b)));
+    const all = () => cfgRef.current.sections.flatMap(s => itemsOnPage(s).map(b => effItem(s, b)));
     const down = e => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); saveRef.current(); return; }
       if (editRef.current || e.target.closest("input,select,textarea")) return;
@@ -249,7 +258,7 @@ function App() {
       const name = gp ? gp.id : "";
       if (name !== lastName) { lastName = name; setGpName(name); }
       if (gp && !editRef.current) {
-        const cfg = cfgRef.current; const all = cfg.sections.flatMap(s => s.items.map(b => effItem(s, b)));
+        const cfg = cfgRef.current; const all = cfg.sections.flatMap(s => itemsOnPage(s).map(b => effItem(s, b)));
         gp.buttons.forEach((b, i) => {
           const p = b.pressed; if (p === prevBtn[i]) return; prevBtn[i] = p;
           const label = GP_BUTTONS[i]; if (!label) return;
@@ -356,10 +365,36 @@ function App() {
 
   // ---------- edit helpers ----------
   const findBtn = (d, id) => { for (const s of d.sections) { const i = s.items.findIndex(b => b.id === id); if (i >= 0) return { s, i }; } return null; };
-  const addButton = (secId) => { const b = btn({}); update(d => d.sections.find(s => s.id === secId).items.push(b)); setSel({ kind: "button", id: b.id }); };
+  const addButton = (secId) => {
+    const b = btn({});
+    update(d => { const s = d.sections.find(x => x.id === secId); b.pageId = s.activePage; s.items.push(b); });
+    setSel({ kind: "button", id: b.id });
+  };
   const addSection = () => { const s = { id: uid(), title: "New section", cols: 4, outputName: "", channel: 0, items: [] }; update(d => d.sections.push(s)); setSel({ kind: "section", id: s.id }); };
   const addFader = () => { const f = fdr({}); update(d => d.faders.push(f)); setSel({ kind: "fader", id: f.id }); };
   const setS = (k, v) => update(d => { d.settings[k] = v; });
+
+  // ---------- pad tabs (pages within a section) ----------
+  const setPage = (secId, pageId) => update(d => { d.sections.find(s => s.id === secId).activePage = pageId; });
+  const addPage = (secId) => update(d => {
+    const s = d.sections.find(x => x.id === secId);
+    if (!s.pages || !s.pages.length) {
+      const p0 = { id: uid(), title: "1" };
+      s.items.forEach(b => { b.pageId = p0.id; });
+      s.pages = [p0]; s.activePage = p0.id;
+    }
+    const np = { id: uid(), title: String(s.pages.length + 1) };
+    s.pages.push(np); s.activePage = np.id;
+  });
+  const renamePage = (secId, pageId, title) => update(d => {
+    d.sections.find(x => x.id === secId).pages.find(p => p.id === pageId).title = title;
+  });
+  const deletePage = (secId, pageId) => update(d => {
+    const s = d.sections.find(x => x.id === secId); if (s.pages.length <= 1) return;
+    s.items = s.items.filter(b => (b.pageId || s.pages[0].id) !== pageId);
+    s.pages = s.pages.filter(p => p.id !== pageId);
+    if (s.activePage === pageId) s.activePage = s.pages[0].id;
+  });
 
   const status = midiErr ? "err" : output ? "on" : "";
 
@@ -409,18 +444,22 @@ function App() {
 
       <main className="deck">
         {config.sections.map(s => {
-          const rows = s.rows || Math.max(1, Math.ceil(s.items.length / s.cols));
+          const pageItems = itemsOnPage(s);
+          const rows = s.rows || Math.max(1, Math.ceil(pageItems.length / s.cols));
           return (
             <div className="section" key={s.id} style={{ flex: `${rows} 1 0` }}>
               <div className="lane">
                 <span className="tag">{s.title}</span>
+                {s.pages && s.pages.length > 1 && s.pages.map(p => (
+                  <button key={p.id} className={"tb" + (s.activePage === p.id ? " on" : "")} onClick={() => setPage(s.id, p.id)}>{p.title}</button>
+                ))}
                 {edit && <>
                   <button className={"tb" + (sel && sel.id === s.id ? " on" : "")} onClick={() => setSel({ kind: "section", id: s.id })}>Edit section</button>
                   <button className="tb" onClick={() => addButton(s.id)}>Add button</button>
                 </>}
               </div>
               <div className="grid" style={{ gridTemplateColumns: `repeat(${s.cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)` }}>
-                {s.items.map(b => {
+                {pageItems.map(b => {
                   const eff = effItem(s, b);
                   return (
                     <PadButton key={b.id} b={b} lit={!!activeRef.current[b.id]} edit={edit}
@@ -446,7 +485,8 @@ function App() {
         </>}
       </footer>
 
-      {edit && sel && <Editor sel={sel} config={config} update={update} findBtn={findBtn} close={() => setSel(null)} setSel={setSel} outputs={outputs} />}
+      {edit && sel && <Editor sel={sel} config={config} update={update} findBtn={findBtn} close={() => setSel(null)} setSel={setSel} outputs={outputs}
+        addPage={addPage} renamePage={renamePage} deletePage={deletePage} />}
       {edit && !sel && (
         <div className="drawer">
           <h3>Edit mode</h3>
@@ -563,7 +603,7 @@ function Swatches({ value, onChange }) {
   );
 }
 
-function Editor({ sel, config, update, findBtn, close, setSel, outputs }) {
+function Editor({ sel, config, update, findBtn, close, setSel, outputs, addPage, renamePage, deletePage }) {
   if (sel.kind === "button") {
     const loc = findBtn(config, sel.id); if (!loc) return null;
     const b = loc.s.items[loc.i];
@@ -572,7 +612,7 @@ function Editor({ sel, config, update, findBtn, close, setSel, outputs }) {
       [l.s.items[l.i], l.s.items[j]] = [l.s.items[j], l.s.items[l.i]]; });
     const dup = () => { const id = uid(); update(d => { const l = findBtn(d, sel.id); l.s.items.splice(l.i + 1, 0, { ...l.s.items[l.i], id, key: "", gamepad: "" }); }); setSel({ kind: "button", id }); };
     const del = () => { update(d => { const l = findBtn(d, sel.id); l.s.items.splice(l.i, 1); }); close(); };
-    const toSection = secId => update(d => { const l = findBtn(d, sel.id); const [it] = l.s.items.splice(l.i, 1); d.sections.find(s => s.id === secId).items.push(it); });
+    const toSection = secId => update(d => { const l = findBtn(d, sel.id); const [it] = l.s.items.splice(l.i, 1); const target = d.sections.find(s => s.id === secId); it.pageId = target.activePage; target.items.push(it); });
     return (
       <div className="drawer">
         <h3>Block <button className="tb" onClick={close}>Close</button></h3>
@@ -687,6 +727,19 @@ function Editor({ sel, config, update, findBtn, close, setSel, outputs }) {
           <Field label="MIDI output"><OutputSelect value={s.outputName} outputs={outputs} onChange={v => set("outputName", v)} /></Field>
           <Field label="Channel"><ChannelSelect value={s.channel || 0} onChange={v => set("channel", v)} /></Field>
         </div>
+        <Field label="Pad tabs">
+          {(s.pages || []).map(p => {
+            const count = s.items.filter(b => (b.pageId || s.pages[0].id) === p.id).length;
+            return (
+              <div className="two" key={p.id}>
+                <input type="text" value={p.title} onChange={e => renamePage(s.id, p.id, e.target.value)} />
+                <button className="tb danger" disabled={s.pages.length <= 1}
+                  onClick={() => { if (!count || confirm(`Delete tab "${p.title}" and its ${count} buttons?`)) deletePage(s.id, p.id); }}>Delete</button>
+              </div>
+            );
+          })}
+          <button className="tb" onClick={() => addPage(s.id)}>Add tab</button>
+        </Field>
         <div className="actions">
           <button className="tb" onClick={() => move(-1)}>Move up</button>
           <button className="tb" onClick={() => move(1)}>Move down</button>
@@ -694,6 +747,7 @@ function Editor({ sel, config, update, findBtn, close, setSel, outputs }) {
         </div>
         <p className="help">Sections share the screen height by how many rows they have, so the deck always fills the display.</p>
         <p className="help">MIDI output and channel here set the default for every button in this section. Each button's own Channel field (and the global settings in the top bar) still override it.</p>
+        <p className="help">Pad tabs split a section's buttons into switchable pages — handy when you have more pads than fit on screen. Tabs only show in the section header once there's more than one.</p>
       </div>
     );
   }
