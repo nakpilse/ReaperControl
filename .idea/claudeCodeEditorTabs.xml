@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ClaudeCodeEditorTabs">
-    <option name="activeSessionId" value="5cef234f-ca22-4cef-95bb-5d846185ecd6" />
+    <option name="activeSessionId" value="e88aaaf0-a684-4f69-9aec-fb67955459a6" />
     <option name="openSessionIds">
       <list>
         <option value="06116c64-84de-4f44-bbec-2bc872d7cc6f" />
@@ -10,6 +10,7 @@
         <option value="51f89c46-b6e7-4478-900d-8956eeaea751" />
         <option value="4beb4033-38a4-4666-929c-880dcfdb64e7" />
         <option value="5cef234f-ca22-4cef-95bb-5d846185ecd6" />
+        <option value="e88aaaf0-a684-4f69-9aec-fb67955459a6" />
       </list>
     </option>
     <option name="sessionPaths">
@@ -19,6 +20,7 @@
         <entry key="4beb4033-38a4-4666-929c-880dcfdb64e7" value="/sessions/4bcf088a-8c94-4db0-8fb7-510e27a6ae12" />
         <entry key="51f89c46-b6e7-4478-900d-8956eeaea751" value="/sessions/f6f0b30c-319d-4711-90bb-4a10efac2d51" />
         <entry key="5cef234f-ca22-4cef-95bb-5d846185ecd6" value="/sessions/51651551-9593-49c6-b6d5-22f10dad8a97" />
+        <entry key="e88aaaf0-a684-4f69-9aec-fb67955459a6" value="/sessions/b2f833b9-2e46-4804-b81f-ff017655c0ad" />
         <entry key="eaf67600-86d7-404c-a2ed-23000d734d00" value="/sessions/60e0a2a4-9923-44ef-b0c2-6a1d8c726618" />
       </map>
     </option>
@@ -29,6 +31,7 @@
         <entry key="4beb4033-38a4-4666-929c-880dcfdb64e7" value="remove the strict mode" />
         <entry key="51f89c46-b6e7-4478-900d-8956eeaea751" value="use the localstorage when saving instead of saving" />
         <entry key="5cef234f-ca22-4cef-95bb-5d846185ecd6" value="on sections when row or column is set to non 0, it" />
+        <entry key="e88aaaf0-a684-4f69-9aec-fb67955459a6" value="add a group feature both on transport, pads,tabs s" />
         <entry key="eaf67600-86d7-404c-a2ed-23000d734d00" value="will this work if i serve it remotely?" />
       </map>
     </option>

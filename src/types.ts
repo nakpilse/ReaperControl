@@ -18,6 +18,19 @@ export interface PadItem {
   key: string;
   gamepad: string;
   pageId?: string;
+  /** Set = this block is a group: a frame spanning cells of its section's grid, holding its own smaller grid of buttons */
+  group?: GroupGrid;
+  /** Set on a button that lives inside a group (the group block's id) */
+  groupId?: string;
+}
+
+export interface GroupGrid {
+  /** Cells it occupies in the section/tab grid */
+  colSpan: number;
+  rowSpan: number;
+  /** Its own inner grid; rows 0 = auto (grows with the buttons) */
+  cols: number;
+  rows: number;
 }
 
 /** A button resolved against its page/section output and channel defaults. */

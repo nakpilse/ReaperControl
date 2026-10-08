@@ -85,7 +85,17 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .pad.lit { border-color: var(--c); background: color-mix(in srgb, var(--c) 20%, var(--block));
            box-shadow: 0 0 0 1px var(--c), 0 0 22px color-mix(in srgb, var(--c) 40%, transparent); }
 .pad.lit::before { opacity: 1; box-shadow: 0 0 10px var(--c); }
-.edit .pad, .edit .knob { outline: 1px dashed #4A5057; outline-offset: 2px; }
+/* group: a framed block spanning several cells, with its own smaller grid of pads */
+.group { --c: #8A929B; display: flex; flex-direction: column; gap: .3em; min-width: 0; min-height: 0; padding: .35em;
+         border: 1px solid var(--line); border-radius: 14px; background: color-mix(in srgb, var(--c) 7%, var(--inset)); }
+.group .ghead { display: flex; align-items: center; gap: .4em; padding: 0 .3em; font-size: .72em; color: var(--dim); }
+.group .gname { flex: 1; color: var(--c); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.group .grid { gap: .35em; }
+.group .pad { border-radius: 9px; padding: .4em .5em .3em; }
+.group .pad .lbl { font-size: .95em; }
+button.tb.mini { padding: 0 .6em; line-height: 1.5; }
+.edit .group .ghead { cursor: pointer; }
+.edit .pad, .edit .knob, .edit .group { outline: 1px dashed #4A5057; outline-offset: 2px; }
 .edit .sel { outline: 2px solid var(--amber) !important; }
 
 /* ---------- parameter strip (knobs) ---------- */

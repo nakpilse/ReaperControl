@@ -2,13 +2,14 @@ import { useCallback, useEffect, useReducer, useRef, useState, type ChangeEvent 
 import { Editor } from "./components/Editor";
 import { Knob } from "./components/Knob";
 import { PadButton } from "./components/PadButton";
+import { PadGroup } from "./components/PadGroup";
 import { SaveDialog } from "./components/SaveDialog";
 import { Slider } from "./components/Slider";
 import {
-  btn, clamp, effItem, faderMax, fdr, FILE_NAME, GP_AXIS_INDEX, GP_BUTTONS, gridOf, itemsOnPage, LS_KEY,
-  makeDefault, makeHelixPage, noteName, pageCapacity, uid, validConfig,
+  blocksOnPage, btn, cellsUsed, clamp, effItem, faderMax, fdr, FILE_NAME, GP_AXIS_INDEX, GP_BUTTONS, gridOf, groupCapacity,
+  groupItems, grp, LS_KEY, makeDefault, makeHelixPage, noteName, pageCapacity, playableOnPage, spanOf, uid, validConfig,
 } from "./config";
-import type { Config, EffItem, FaderStyle, Page, Section, Selection, Settings, UpdateConfig } from "./types";
+import type { Config, EffItem, FaderStyle, PadItem, Page, Section, Selection, Settings, UpdateConfig } from "./types";
 
 const errMsg = (e: unknown) => e instanceof Error ? e.message : String(e);
 
@@ -128,7 +129,7 @@ export function App() {
   // ---------- computer keyboard ----------
   useEffect(() => {
     const keyOf = (e: KeyboardEvent) => e.key === " " ? "space" : e.key.toLowerCase();
-    const all = () => cfgRef.current.sections.flatMap(s => itemsOnPage(s).map(b => effItem(s, b)));
+    const all = () => cfgRef.current.sections.flatMap(s => playableOnPage(s).map(b => effItem(s, b)));
     const down = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); openSaveRef.current(); return; }
       if (editRef.current || (e.target instanceof Element && e.target.closest("input,select,textarea"))) return;
@@ -153,7 +154,7 @@ export function App() {
       const name = gp ? gp.id : "";
       if (name !== lastName) { lastName = name; setGpName(name); }
       if (gp && !editRef.current) {
-        const cfg = cfgRef.current; const all = cfg.sections.flatMap(s => itemsOnPage(s).map(b => effItem(s, b)));
+        const cfg = cfgRef.current; const all = cfg.sections.flatMap(s => playableOnPage(s).map(b => effItem(s, b)));
         gp.buttons.forEach((b, i) => {
           const p = b.pressed; if (p === prevBtn[i]) return; prevBtn[i] = p;
           const label = GP_BUTTONS[i]; if (!label) return;
@@ -209,11 +210,20 @@ export function App() {
   };
 
   // ---------- edit helpers ----------
-  const addButton = (secId: string) => {
+  // Adds a button or a 1×1 group to the active tab, if its grid has a free cell
+  const addBlock = (secId: string, b: PadItem) => {
     const s = cfgRef.current.sections.find(x => x.id === secId);
-    if (!s || itemsOnPage(s).length >= pageCapacity(s)) return;
-    const b = btn({});
+    if (!s || cellsUsed(s) >= pageCapacity(s)) return;
     update(d => { const s = d.sections.find(x => x.id === secId)!; b.pageId = s.activePage; s.items.push(b); });
+    setSel({ kind: "button", id: b.id });
+  };
+  const addButton = (secId: string) => addBlock(secId, btn({}));
+  const addGroup = (secId: string) => addBlock(secId, grp({}));
+  const addToGroup = (secId: string, gid: string) => {
+    const s = cfgRef.current.sections.find(x => x.id === secId); const g = s?.items.find(x => x.id === gid);
+    if (!s || !g || groupItems(s, gid).length >= groupCapacity(g)) return;
+    const b = btn({ pageId: g.pageId, groupId: gid });
+    update(d => { d.sections.find(x => x.id === secId)!.items.push(b); });
     setSel({ kind: "button", id: b.id });
   };
   const addSection = () => { const s: Section = { id: uid(), title: "New section", cols: 4, outputName: "", channel: 0, items: [] }; update(d => { d.sections.push(s); }); setSel({ kind: "section", id: s.id }); };
@@ -301,10 +311,21 @@ export function App() {
 
       <main className="deck">
         {config.sections.map(s => {
-          const pageItems = itemsOnPage(s);
+          const blocks = blocksOnPage(s);
           const g = gridOf(s); const cols = g.cols;
-          const rows = g.rows || Math.max(1, Math.ceil(pageItems.length / cols));
-          const cap = pageCapacity(s); const full = pageItems.length >= cap;
+          const used = cellsUsed(s);
+          const tallest = blocks.reduce((m, b) => Math.max(m, spanOf(b, cols).r), 1);
+          const rows = g.rows || Math.max(tallest, Math.ceil(used / cols));
+          const cap = pageCapacity(s); const full = used >= cap;
+          const pad = (b: PadItem) => {
+            const eff = effItem(s, b);
+            return (
+              <PadButton key={b.id} b={b} lit={!!activeRef.current[b.id]} edit={edit}
+                selected={sel?.id === b.id}
+                onSelect={() => setSel({ kind: "button", id: b.id })}
+                onPress={() => press(eff)} onRelease={() => release(eff)} />
+            );
+          };
           return (
             <div className="section" key={s.id} style={{ flex: `${rows} 1 0` }}>
               <div className="lane">
@@ -316,18 +337,24 @@ export function App() {
                   <button className={"tb" + (sel?.id === s.id ? " on" : "")} onClick={() => setSel({ kind: "section", id: s.id })}>Edit section</button>
                   <button className="tb" onClick={() => addButton(s.id)} disabled={full}
                     title={full ? `Grid is full (${cols} × ${rows}) — raise Columns/Rows or set Rows to 0 for auto` : undefined}>
-                    Add button{cap !== Infinity ? ` (${pageItems.length}/${cap})` : ""}
+                    Add button{cap !== Infinity ? ` (${used}/${cap})` : ""}
+                  </button>
+                  <button className="tb" onClick={() => addGroup(s.id)} disabled={full}
+                    title={full ? `Grid is full (${cols} × ${rows})` : "Add a group: a block with its own smaller grid of buttons"}>
+                    Add group
                   </button>
                 </>}
               </div>
-              <div className="grid" style={{ gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)` }}>
-                {pageItems.map(b => {
-                  const eff = effItem(s, b);
+              <div className="grid" style={{ gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)`, gridAutoFlow: "row dense" }}>
+                {blocks.map(b => {
+                  if (!b.group) return pad(b);
+                  const kids = groupItems(s, b.id);
                   return (
-                    <PadButton key={b.id} b={b} lit={!!activeRef.current[b.id]} edit={edit}
-                      selected={sel?.id === b.id}
-                      onSelect={() => setSel({ kind: "button", id: b.id })}
-                      onPress={() => press(eff)} onRelease={() => release(eff)} />
+                    <PadGroup key={b.id} g={b} span={spanOf(b, cols)} count={kids.length} edit={edit}
+                      selected={sel?.id === b.id} full={kids.length >= groupCapacity(b)}
+                      onSelect={() => setSel({ kind: "button", id: b.id })} onAdd={() => addToGroup(s.id, b.id)}>
+                      {kids.map(pad)}
+                    </PadGroup>
                   );
                 })}
               </div>
@@ -350,7 +377,7 @@ export function App() {
       </footer>
 
       {edit && sel && <Editor sel={sel} config={config} update={update} close={() => setSel(null)} setSel={setSel} outputs={outputs}
-        addPage={addPage} addHelixTab={addHelixTab} renamePage={renamePage} setPageField={setPageField} deletePage={deletePage} />}
+        addToGroup={addToGroup} addPage={addPage} addHelixTab={addHelixTab} renamePage={renamePage} setPageField={setPageField} deletePage={deletePage} />}
       {saveOpen && <SaveDialog name={config.settings.name || ""} onSave={save} onClose={() => setSaveOpen(false)} />}
     </div>
   );

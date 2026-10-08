@@ -49,6 +49,27 @@ export const gridOf = (s: Section): { cols: number; rows: number } => {
 };
 export const pageCapacity = (s: Section): number => { const g = gridOf(s); return g.rows ? g.cols * g.rows : Infinity; };
 
+// ---------- groups ----------
+// A group is a block in the section's items with `group` set; its buttons carry
+// `groupId`. It spans colSpan × rowSpan cells of the tab grid and lays its own
+// buttons out on a smaller cols × rows grid inside that space.
+export const grp = (o: Partial<PadItem>): PadItem => btn({ label: "Group", group: { colSpan: 1, rowSpan: 1, cols: 2, rows: 2 }, ...o });
+export const groupItems = (s: Section, gid: string): PadItem[] => s.items.filter(b => b.groupId === gid);
+// Top-level blocks on the active tab — buttons and groups, not the buttons inside
+// a group (a button whose group no longer exists is shown at the top level).
+export const blocksOnPage = (s: Section): PadItem[] => {
+  const items = itemsOnPage(s); const groups = new Set(items.filter(b => b.group).map(b => b.id));
+  return items.filter(b => !b.groupId || !groups.has(b.groupId));
+};
+// Everything on the active tab that sends MIDI (keyboard/gamepad bindings)
+export const playableOnPage = (s: Section): PadItem[] => itemsOnPage(s).filter(b => !b.group);
+export const spanOf = (b: PadItem, cols: number) => b.group ? { c: clamp(b.group.colSpan, 1, cols), r: Math.max(1, b.group.rowSpan) } : { c: 1, r: 1 };
+export const cellsUsed = (s: Section): number => {
+  const { cols } = gridOf(s);
+  return blocksOnPage(s).reduce((n, b) => { const sp = spanOf(b, cols); return n + sp.c * sp.r; }, 0);
+};
+export const groupCapacity = (g: PadItem): number => g.group && g.group.rows ? g.group.cols * g.group.rows : Infinity;
+
 // Helix Native MIDI implementation (Line 6 Helix MIDI/OSC reference): Program
 // Change selects presets 1:1 (PC 0 = preset 1, etc). CC#69 (values 0-7) selects
 // Snapshots 1-8 — this is Helix's fixed/global snapshot controller, not
