@@ -2,18 +2,15 @@ import { useCallback, useEffect, useReducer, useRef, useState, type ChangeEvent 
 import { Editor } from "./components/Editor";
 import { Knob } from "./components/Knob";
 import { PadButton } from "./components/PadButton";
+import { SaveDialog } from "./components/SaveDialog";
 import { Slider } from "./components/Slider";
 import {
   btn, clamp, effItem, faderMax, fdr, FILE_NAME, GP_AXIS_INDEX, GP_BUTTONS, itemsOnPage, LS_KEY,
   makeDefault, makeHelixPage, noteName, uid, validConfig,
 } from "./config";
-import { idb } from "./idb";
 import type { Config, EffItem, FaderStyle, Page, Section, Selection, Settings, UpdateConfig } from "./types";
 
-type FolderState = "none" | "prompt" | "connected";
-
 const errMsg = (e: unknown) => e instanceof Error ? e.message : String(e);
-const isAbort = (e: unknown) => e instanceof DOMException && e.name === "AbortError";
 
 export function App() {
   const [config, setConfig] = useState<Config>(() => {
@@ -25,8 +22,6 @@ export function App() {
   const [last, setLast] = useState("Ready");
   const [edit, setEdit] = useState(false);
   const [sel, setSel] = useState<Selection | null>(null);
-  const [folder, setFolder] = useState<FileSystemDirectoryHandle | null>(null);
-  const [folderState, setFolderState] = useState<FolderState>("none");
   const [saveMsg, setSaveMsg] = useState("");
   const [gpName, setGpName] = useState("");
   const [isFull, setIsFull] = useState(false);
@@ -113,31 +108,29 @@ export function App() {
   };
 
   // ---------- saving ----------
-  const writeFolder = async (h: FileSystemDirectoryHandle, cfg: Config) => {
-    const fh = await h.getFileHandle(FILE_NAME, { create: true });
-    const w = await fh.createWritable(); await w.write(JSON.stringify(cfg, null, 2)); await w.close();
-  };
-  const readFolder = async (h: FileSystemDirectoryHandle) => {
-    try { const fh = await h.getFileHandle(FILE_NAME); const c: unknown = JSON.parse(await (await fh.getFile()).text());
-          return validConfig(c) ? c : null; } catch { return null; }
+  const writeLocal = (cfg: Config) => {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(cfg)); return true; }
+    catch (e) { setSaveMsg("Save failed: " + errMsg(e)); return false; }
   };
 
-  const save = async () => {
-    const cfg = cfgRef.current;
-    localStorage.setItem(LS_KEY, JSON.stringify(cfg));
-    if (folder && folderState === "connected") {
-      try { await writeFolder(folder, cfg); setSaveMsg("Saved to " + folder.name + "/" + FILE_NAME); }
-      catch (e) { setSaveMsg("Folder save failed: " + errMsg(e)); }
-    } else setSaveMsg("Saved in browser only — link a folder to save a file");
+  const [saveOpen, setSaveOpen] = useState(false);
+  const openSave = () => setSaveOpen(true);
+  const openSaveRef = useRef(openSave); openSaveRef.current = openSave;
+
+  const save = (name: string, reload: boolean) => {
+    const cfg = structuredClone(cfgRef.current); cfg.settings.name = name;
+    setConfig(cfg); setSaveOpen(false);
+    if (!writeLocal(cfg)) return;
+    if (reload) { setSaveMsg("Saved in browser — reloading…"); setTimeout(() => location.reload(), 300); }
+    else setSaveMsg("Saved in browser");
   };
-  const saveRef = useRef(save); saveRef.current = save;
 
   // ---------- computer keyboard ----------
   useEffect(() => {
     const keyOf = (e: KeyboardEvent) => e.key === " " ? "space" : e.key.toLowerCase();
     const all = () => cfgRef.current.sections.flatMap(s => itemsOnPage(s).map(b => effItem(s, b)));
     const down = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); saveRef.current(); return; }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); openSaveRef.current(); return; }
       if (editRef.current || (e.target instanceof Element && e.target.closest("input,select,textarea"))) return;
       const hits = all().filter(b => b.key && b.key === keyOf(e));
       if (!hits.length) return;
@@ -185,69 +178,8 @@ export function App() {
     loop(); return () => cancelAnimationFrame(raf);
   }, []);
 
-  // load folder handle on start
-  useEffect(() => { (async () => {
-    try {
-      const h = await idb.get<FileSystemDirectoryHandle>("dir"); if (!h) return;
-      setFolder(h);
-      if ((await h.queryPermission({ mode: "readwrite" })) === "granted") {
-        const c = await readFolder(h); if (c) setConfig(c);
-        setFolderState("connected"); setSaveMsg("Loaded from " + h.name);
-      } else setFolderState("prompt");
-    } catch {}
-  })(); }, []);
-
-  // autosave: browser immediately, folder after a pause
-  useEffect(() => {
-    localStorage.setItem(LS_KEY, JSON.stringify(config));
-    if (!(folder && folderState === "connected")) return;
-    setSaveMsg("Saving…");
-    const t = setTimeout(() => writeFolder(folder, config)
-      .then(() => setSaveMsg("Saved to " + folder.name))
-      .catch(e => setSaveMsg("Folder save failed: " + errMsg(e))), 700);
-    return () => clearTimeout(t);
-  }, [config, folder, folderState]);
-
-  const linkFolder = async () => {
-    if (!window.showDirectoryPicker) { alert("Folder saving needs Chrome or Edge. Use Export instead."); return; }
-    try {
-      const h = await window.showDirectoryPicker({ id: "reaper-midi", mode: "readwrite" });
-      await idb.set("dir", h); setFolder(h);
-      const existing = await readFolder(h);
-      if (existing && confirm(`Found ${FILE_NAME} in "${h.name}". Load it?\n\nOK = load the file\nCancel = overwrite it with the current layout`)) setConfig(existing);
-      else await writeFolder(h, cfgRef.current);
-      setFolderState("connected"); setSaveMsg("Linked to " + h.name);
-    } catch (e) { if (!isAbort(e)) setSaveMsg("Couldn't link folder: " + errMsg(e)); }
-  };
-  const reconnect = async () => {
-    if (!folder || (await folder.requestPermission({ mode: "readwrite" })) !== "granted") return;
-    const c = await readFolder(folder); if (c) setConfig(c);
-    setFolderState("connected"); setSaveMsg("Reconnected to " + folder.name);
-  };
-  const unlink = async () => { await idb.del("dir"); setFolder(null); setFolderState("none"); setSaveMsg("Folder unlinked"); };
-
-  // Save the current layout to the folder file, then reload the page from it
-  const saveAndReload = async () => {
-    const cfg = cfgRef.current;
-    localStorage.setItem(LS_KEY, JSON.stringify(cfg));
-    try {
-      let h = folder;
-      if (!h) {
-        if (!window.showDirectoryPicker) { setSaveMsg("Saved in browser — reloading…"); setTimeout(() => location.reload(), 300); return; }
-        h = await window.showDirectoryPicker({ id: "reaper-midi", mode: "readwrite" });
-        await idb.set("dir", h);
-      } else if ((await h.queryPermission({ mode: "readwrite" })) !== "granted"
-              && (await h.requestPermission({ mode: "readwrite" })) !== "granted") {
-        setSaveMsg("Saving to the folder wasn't allowed — nothing reloaded"); return;
-      }
-      setSaveMsg("Saving…");
-      await writeFolder(h, cfg);
-      setSaveMsg("Saved to " + h.name + "/" + FILE_NAME + " — reloading…");
-      setTimeout(() => location.reload(), 400);
-    } catch (e) {
-      if (!isAbort(e)) setSaveMsg("Save failed, page not reloaded: " + errMsg(e));
-    }
-  };
+  // autosave to the browser on every change
+  useEffect(() => { writeLocal(config); }, [config]);
 
   const exportJson = () => {
     const a = document.createElement("a");
@@ -264,6 +196,17 @@ export function App() {
   // ---------- fullscreen ----------
   useEffect(() => { const h = () => setIsFull(!!document.fullscreenElement); document.addEventListener("fullscreenchange", h); return () => document.removeEventListener("fullscreenchange", h); }, []);
   const toggleFull = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen({ navigationUI: "hide" });
+
+  // ---------- edit mode ----------
+  // Snapshot taken on entering edit mode so Cancel can roll back every change
+  const editSnapRef = useRef<Config | null>(null);
+  const startEdit = () => { editSnapRef.current = structuredClone(cfgRef.current); setSel(null); setEdit(true); };
+  const finishEdit = () => { editSnapRef.current = null; setSel(null); setEdit(false); };
+  const cancelEdit = () => {
+    const snap = editSnapRef.current;
+    if (snap) { setConfig(snap); setSaveMsg("Edits discarded"); }
+    finishEdit();
+  };
 
   // ---------- edit helpers ----------
   const addButton = (secId: string) => {
@@ -334,29 +277,24 @@ export function App() {
           <span>{last}</span>
           {gpName && <span className="pad-ico" title={gpName}>🎮</span>}
         </div>
-        <button className={"tb" + (edit ? " on" : "")} onClick={() => { setEdit(!edit); setSel(null); }}>{edit ? "Done" : "Edit"}</button>
+        <button className={"tb" + (edit ? " on" : "")} onClick={edit ? finishEdit : startEdit}>{edit ? "Done" : "Edit"}</button>
+        {edit && <button className="tb" onClick={cancelEdit} title="Discard changes made since entering edit mode">Cancel</button>}
         <button className="tb" onClick={toggleFull}>{isFull ? "Exit full" : "Fullscreen"}</button>
         <button className="tb danger" onClick={panic}>Panic</button>
       </header>
 
       {edit ? (
         <div className="tools">
-          <button className="tb primary" onClick={saveAndReload} title="Write reaper-midi-layout.json, then reload">Save &amp; reload</button>
+          <button className="tb primary" onClick={openSave} title="Save layout (Ctrl+S)">Save</button>
           <button className="tb" onClick={addSection}>Add section</button>
           <button className="tb" onClick={() => addFader("knob")}>Add knob</button>
           <button className="tb" onClick={() => addFader("fader")}>Add fader</button>
-          {folderState === "none" && <button className="tb" onClick={linkFolder}>Link save folder</button>}
-          {folderState === "prompt" && <button className="tb on" onClick={reconnect}>Reconnect {folder && folder.name}</button>}
-          {folderState === "connected" && <><button className="tb" onClick={save}>Save now</button><button className="tb" onClick={unlink}>Unlink folder</button></>}
           <button className="tb" onClick={exportJson}>Export</button>
           <button className="tb" onClick={() => importRef.current?.click()}>Import</button>
           <button className="tb" onClick={() => { if (confirm("Reset to the default layout?")) { setConfig(makeDefault()); setSel(null); } }}>Reset</button>
           <span className="chip">{saveMsg}</span>
           <input ref={importRef} type="file" accept=".json,application/json" hidden onChange={importJson} />
         </div>
-      ) : folderState === "prompt" ? (
-        <div className="tools"><button className="tb primary" onClick={reconnect}>Reconnect save folder “{folder && folder.name}”</button>
-          <span className="chip">The browser needs one click to allow saving again.</span></div>
       ) : <div></div>}
 
       <main className="deck">
@@ -406,20 +344,7 @@ export function App() {
 
       {edit && sel && <Editor sel={sel} config={config} update={update} close={() => setSel(null)} setSel={setSel} outputs={outputs}
         addPage={addPage} addHelixTab={addHelixTab} renamePage={renamePage} setPageField={setPageField} deletePage={deletePage} />}
-      {edit && !sel && (
-        <div className="drawer">
-          <h3>Edit mode</h3>
-          <label className="field">Layout name<input type="text" value={config.settings.name || ""} placeholder="REAPER Control"
-            onChange={e => setS("name", e.target.value)} /></label>
-          <p className="help">Tap any block, knob or “Edit section” to change it. Changes save automatically
-            {folderState === "connected" && folder
-              ? <> to <b>{folder.name}/{FILE_NAME}</b>.</>
-              : <> in this browser. Use “Link save folder” and pick the folder this HTML file is in to keep the layout as a file next to it.</>}
-          </p>
-          <p className="help">Save &amp; reload writes the file and restarts the controller from it. Ctrl+S saves without reloading.</p>
-          <p className="help">Gamepad bindings work when the GPD Win 4 is in gamepad mode. Press any controller button once so the browser detects it.</p>
-        </div>
-      )}
+      {saveOpen && <SaveDialog name={config.settings.name || ""} onSave={save} onClose={() => setSaveOpen(false)} />}
     </div>
   );
 }
