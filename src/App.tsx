@@ -9,7 +9,7 @@ import {
   blocksOnPage, btn, cellsUsed, clamp, effItem, faderMax, fdr, FILE_NAME, GP_AXIS_INDEX, GP_BUTTONS, gridOf, groupCapacity,
   groupItems, grp, LS_KEY, makeDefault, makeHelixPage, noteName, pageCapacity, playableOnPage, spanOf, uid, validConfig,
 } from "./config";
-import type { Config, EffItem, FaderStyle, PadItem, Page, Section, Selection, Settings, UpdateConfig } from "./types";
+import type { ClockState, Config, EffItem, FaderStyle, PadItem, Page, Section, Selection, Settings, UpdateConfig } from "./types";
 
 const errMsg = (e: unknown) => e instanceof Error ? e.message : String(e);
 
@@ -19,6 +19,8 @@ export function App() {
     return makeDefault();
   });
   const [outputs, setOutputs] = useState<MIDIOutput[]>([]);
+  const [inputs, setInputs] = useState<MIDIInput[]>([]);
+  const [clock, setClock] = useState<ClockState>({ bpm: null, playing: false, pos: 0 });
   const [midiErr, setMidiErr] = useState("");
   const [last, setLast] = useState("Ready");
   const [edit, setEdit] = useState(false);
@@ -39,10 +41,46 @@ export function App() {
   useEffect(() => {
     if (!navigator.requestMIDIAccess) { setMidiErr("Web MIDI needs Chrome or Edge"); return; }
     navigator.requestMIDIAccess().then(acc => {
-      const refresh = () => setOutputs([...acc.outputs.values()]);
+      const refresh = () => { setOutputs([...acc.outputs.values()]); setInputs([...acc.inputs.values()]); };
       refresh(); acc.onstatechange = refresh;
     }).catch(e => setMidiErr("MIDI blocked: " + errMsg(e)));
   }, []);
+
+  // ---------- MIDI in (clock from REAPER) ----------
+  // REAPER sends 24 clock ticks per quarter note plus Start/Continue/Stop and
+  // Song Position Pointer to any output with "Send clock/SPP" enabled. Tempo is
+  // averaged over the last beat of ticks; position counts 16ths (6 ticks each).
+  // MIDI clock carries no time signature, so bar.beat assumes 4/4.
+  const input = inputs.find(i => i.name === config.settings.inputName) || null;
+  useEffect(() => {
+    if (!input) { setClock({ bpm: null, playing: false, pos: 0 }); return; }
+    const ticks: number[] = []; let playing = false; let pos = 0; let sub = 0; let raf = 0;
+    const publish = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        const n = ticks.length; const bpm = n > 1 ? Math.round(600000 * (n - 1) / ((ticks[n - 1] - ticks[0]) * 24)) / 10 : null;
+        setClock(c => c.bpm === bpm && c.playing === playing && c.pos === pos ? c : { bpm, playing, pos });
+      });
+    };
+    const onMsg = (e: MIDIMessageEvent) => {
+      const d = e.data; if (!d || !d.length) return;
+      switch (d[0]) {
+        case 0xF8: ticks.push(e.timeStamp); if (ticks.length > 25) ticks.shift();
+          if (playing && ++sub === 6) { sub = 0; pos++; } break;
+        case 0xFA: playing = true; pos = 0; sub = 0; break;
+        case 0xFB: playing = true; break;
+        case 0xFC: playing = false; break;
+        case 0xF2: pos = d[1] | (d[2] << 7); sub = 0; break;
+        default: return;
+      }
+      publish();
+    };
+    // No ticks for a second = clock stopped (REAPER only sends it while playing by default)
+    const idle = setInterval(() => { if (ticks.length && performance.now() - ticks[ticks.length - 1] > 1000) { ticks.length = 0; publish(); } }, 500);
+    input.addEventListener("midimessage", onMsg);
+    return () => { input.removeEventListener("midimessage", onMsg); clearInterval(idle); cancelAnimationFrame(raf); };
+  }, [input]);
 
   const output = outputs.find(o => o.name === config.settings.outputName)
     || outputs.find(o => /loop|iac|virtual/i.test(o.name ?? "")) || outputs[0] || null;
@@ -280,6 +318,14 @@ export function App() {
           {outputs.length === 0 && <option value="">{midiErr || "No MIDI outputs"}</option>}
           {outputs.map(o => <option key={o.id} value={o.name ?? ""}>{o.name}</option>)}
         </select>
+        <select className="out" value={input?.name ?? ""} onChange={e => setS("inputName", e.target.value)} title="MIDI input for clock from REAPER (tempo/transport)">
+          <option value="">No clock input</option>
+          {inputs.map(i => <option key={i.id} value={i.name ?? ""}>{i.name}</option>)}
+        </select>
+        {input && <div className={"clock" + (clock.playing ? " on" : "")} title="Tempo and position from REAPER's MIDI clock (bar.beat assumes 4/4)">
+          <span className="bpm">{clock.bpm != null ? clock.bpm.toFixed(1) : "—"}</span><small>BPM</small>
+          <span>{clock.playing ? "▶" : "■"} {Math.floor(clock.pos / 16) + 1}.{Math.floor(clock.pos / 4) % 4 + 1}</span>
+        </div>}
         <select value={config.settings.channel} onChange={e => setS("channel", +e.target.value)} title="Global channel">
           {Array.from({ length: 16 }, (_, i) => <option key={i} value={i + 1}>Ch {i + 1}</option>)}
         </select>

@@ -79,6 +79,17 @@ export interface Settings {
   outputName: string;
   channel: number;
   velocity: number;
+  /** MIDI input REAPER sends clock to; ""/missing = not listening */
+  inputName?: string;
+}
+
+/** Transport state derived from incoming MIDI clock */
+export interface ClockState {
+  /** null = no clock arriving */
+  bpm: number | null;
+  playing: boolean;
+  /** Song position in 16th notes (from SPP + counted clock ticks) */
+  pos: number;
 }
 
 export interface FaderGroup {
