@@ -47,7 +47,7 @@ interface Props {
   addPage: (secId: string) => void;
   addHelixTab: (secId: string) => void;
   renamePage: (secId: string, pageId: string, title: string) => void;
-  setPageField: <K extends "outputName" | "channel">(secId: string, pageId: string, key: K, val: Page[K]) => void;
+  setPageField: <K extends "outputName" | "channel" | "cols" | "rows">(secId: string, pageId: string, key: K, val: Page[K]) => void;
   deletePage: (secId: string, pageId: string) => void;
 }
 
@@ -196,6 +196,10 @@ export function Editor({ sel, config, update, close, setSel, outputs, addPage, a
                   <OutputSelect value={p.outputName} outputs={outputs} onChange={v => setPageField(s.id, p.id, "outputName", v)} />
                   <ChannelSelect value={p.channel || 0} onChange={v => setPageField(s.id, p.id, "channel", v)} />
                 </div>
+                <div className="two">
+                  <input type="number" min="0" max="16" value={p.cols || 0} title="Columns (0 = section's)" onChange={e => setPageField(s.id, p.id, "cols", num(e.target.value, 0, 16))} />
+                  <input type="number" min="0" max="16" value={p.rows || 0} title="Rows (0 = section's)" onChange={e => setPageField(s.id, p.id, "rows", num(e.target.value, 0, 16))} />
+                </div>
               </div>
             );
           })}
@@ -209,7 +213,7 @@ export function Editor({ sel, config, update, close, setSel, outputs, addPage, a
           <button className="tb" onClick={() => move(1)}>Move down</button>
           <button className="tb danger" onClick={() => { if (!s.items.length || confirm(`Delete “${s.title}” and its ${s.items.length} buttons?`)) { update(d => { d.sections.splice(i, 1); }); close(); } }}>Delete section</button>
         </div>
-        <p className="help">Sections share the screen height by how many rows they have, so the deck always fills the display.</p>
+        <p className="help">Sections share the screen height by how many rows they have, so the deck always fills the display. With a fixed row count, a tab holds at most Columns × Rows buttons; Rows 0 grows as you add. Each tab can override Columns/Rows (0 = use the section's).</p>
         <p className="help">MIDI output and channel here are the section's fallback — used by any tab that leaves its own output/channel on "Global". A button's own Channel field overrides everything.</p>
         <p className="help">Pad tabs split a section's buttons into switchable pages — handy when you have more pads than fit on screen, or want each page on its own MIDI output/channel (e.g. a plugin tab routed to its own port). Tabs only show in the section header once there's more than one.</p>
       </div>

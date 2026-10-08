@@ -41,6 +41,14 @@ export const itemsOnPage = (s: Section): PadItem[] => {
   return p ? s.items.filter(b => (b.pageId || (s.pages![0] && s.pages![0].id)) === p.id) : s.items;
 };
 
+// The active tab's grid — a tab's own cols/rows, if set, win over its section's.
+// rows 0 = auto (grows with the buttons), so only a fixed row count caps the page.
+export const gridOf = (s: Section): { cols: number; rows: number } => {
+  const p = pageOf(s);
+  return { cols: (p && p.cols) || s.cols, rows: (p && p.rows) || s.rows || 0 };
+};
+export const pageCapacity = (s: Section): number => { const g = gridOf(s); return g.rows ? g.cols * g.rows : Infinity; };
+
 // Helix Native MIDI implementation (Line 6 Helix MIDI/OSC reference): Program
 // Change selects presets 1:1 (PC 0 = preset 1, etc). CC#69 (values 0-7) selects
 // Snapshots 1-8 — this is Helix's fixed/global snapshot controller, not

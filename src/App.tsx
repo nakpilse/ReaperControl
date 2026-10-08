@@ -5,8 +5,8 @@ import { PadButton } from "./components/PadButton";
 import { SaveDialog } from "./components/SaveDialog";
 import { Slider } from "./components/Slider";
 import {
-  btn, clamp, effItem, faderMax, fdr, FILE_NAME, GP_AXIS_INDEX, GP_BUTTONS, itemsOnPage, LS_KEY,
-  makeDefault, makeHelixPage, noteName, uid, validConfig,
+  btn, clamp, effItem, faderMax, fdr, FILE_NAME, GP_AXIS_INDEX, GP_BUTTONS, gridOf, itemsOnPage, LS_KEY,
+  makeDefault, makeHelixPage, noteName, pageCapacity, uid, validConfig,
 } from "./config";
 import type { Config, EffItem, FaderStyle, Page, Section, Selection, Settings, UpdateConfig } from "./types";
 
@@ -210,6 +210,8 @@ export function App() {
 
   // ---------- edit helpers ----------
   const addButton = (secId: string) => {
+    const s = cfgRef.current.sections.find(x => x.id === secId);
+    if (!s || itemsOnPage(s).length >= pageCapacity(s)) return;
     const b = btn({});
     update(d => { const s = d.sections.find(x => x.id === secId)!; b.pageId = s.activePage; s.items.push(b); });
     setSel({ kind: "button", id: b.id });
@@ -245,7 +247,7 @@ export function App() {
   const renamePage = (secId: string, pageId: string, title: string) => update(d => {
     findSec(d, secId).pages!.find(p => p.id === pageId)!.title = title;
   });
-  const setPageField = <K extends "outputName" | "channel">(secId: string, pageId: string, key: K, val: Page[K]) => update(d => {
+  const setPageField = <K extends "outputName" | "channel" | "cols" | "rows">(secId: string, pageId: string, key: K, val: Page[K]) => update(d => {
     findSec(d, secId).pages!.find(p => p.id === pageId)![key] = val;
   });
   const deletePage = (secId: string, pageId: string) => update(d => {
@@ -300,7 +302,9 @@ export function App() {
       <main className="deck">
         {config.sections.map(s => {
           const pageItems = itemsOnPage(s);
-          const rows = s.rows || Math.max(1, Math.ceil(pageItems.length / s.cols));
+          const g = gridOf(s); const cols = g.cols;
+          const rows = g.rows || Math.max(1, Math.ceil(pageItems.length / cols));
+          const cap = pageCapacity(s); const full = pageItems.length >= cap;
           return (
             <div className="section" key={s.id} style={{ flex: `${rows} 1 0` }}>
               <div className="lane">
@@ -310,10 +314,13 @@ export function App() {
                 ))}
                 {edit && <>
                   <button className={"tb" + (sel?.id === s.id ? " on" : "")} onClick={() => setSel({ kind: "section", id: s.id })}>Edit section</button>
-                  <button className="tb" onClick={() => addButton(s.id)}>Add button</button>
+                  <button className="tb" onClick={() => addButton(s.id)} disabled={full}
+                    title={full ? `Grid is full (${cols} × ${rows}) — raise Columns/Rows or set Rows to 0 for auto` : undefined}>
+                    Add button{cap !== Infinity ? ` (${pageItems.length}/${cap})` : ""}
+                  </button>
                 </>}
               </div>
-              <div className="grid" style={{ gridTemplateColumns: `repeat(${s.cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)` }}>
+              <div className="grid" style={{ gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)` }}>
                 {pageItems.map(b => {
                   const eff = effItem(s, b);
                   return (

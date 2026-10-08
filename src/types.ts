@@ -44,6 +44,9 @@ export interface Page {
   title: string;
   outputName: string;
   channel: number;
+  /** 0/missing = use the section's grid */
+  cols?: number;
+  rows?: number;
 }
 
 export interface Section {
